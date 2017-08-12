@@ -6,9 +6,9 @@ var STRUCTURE = 'Structure',
     Classy = require('@timelaps/classy'),
     HASH = 'Hash',
     forEachEnd = require('@timelaps/n/for/each/end'),
-    reverseParams = require('../reverse-params'),
+    reverseParams = require('@timelaps/fn/reverse-params'),
     forOwnEnd = require('@timelaps/n/for/own/end'),
-    maker = require('./maker'),
+    maker = require('@timelaps/fn/intended/maker'),
     checkHash = maker(function (key, value, fn) {
         return forEachEnd(key, function (key) {
             return fn(key, value);

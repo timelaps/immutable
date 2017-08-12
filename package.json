@@ -1,0 +1,25 @@
+{
+  "name": "immutable",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timelaps/immutable.git"
+  },
+  "keywords": [],
+  "author": "Michael McLaughlin <michael.j.mclaughlin20@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/timelaps/immutable/issues"
+  },
+  "homepage": "https://github.com/timelaps/immutable#readme",
+  "dependencies": {
+    "@timelaps/classy": "^1.0.10",
+    "@timelaps/fn": "^1.0.8",
+    "@timelaps/n": "^1.0.22"
+  }
+}
