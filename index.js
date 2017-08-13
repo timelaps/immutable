@@ -9,9 +9,10 @@ var Classy = require('@timelaps/classy'),
     get = require('@timelaps/n/get/shallow'),
     set = require('@timelaps/n/set/shallow'),
     del = require('@timelaps/n/del/shallow'),
+    setDeep = require('@timelaps/n/set/deep'),
     forOwnEnd = require('@timelaps/n/for/own/end'),
     isValidIndex = require('@timelaps/is/valid-index'),
-    toArray = require('@timelaps/to/array'),
+    toArrayFromArrayLike = require('@timelaps/to/array/from/array-like'),
     assign = require('@timelaps/object/assign'),
     returnsFirst = require('@timelaps/returns/first'),
     isEqual = require('@timelaps/is/equal'),
@@ -19,24 +20,45 @@ var Classy = require('@timelaps/classy'),
     isUndefined = require('@timelaps/is/undefined'),
     toBoolean = require('@timelaps/hacks/to-boolean'),
     forEach = require('@timelaps/n/for/each'),
+    reduceOwn = require('@timelaps/array/reduce/own'),
+    reduce = require('@timelaps/array/reduce'),
+    generator = require('@timelaps/fn/generator'),
+    isNumber = require('@timelaps/is/number'),
+    counter = 0,
+    b = require('@timelaps/batterie'),
     ImmutableObject = module.exports = Classy.extend('ImmutableObject', {
-        lifecycle: {
-            created: function (supr, value, target) {
-                supr();
-                var context = this,
-                    resolveStructure = context.member('resolveStructure'),
-                    resolveArrayLike = context.member('resolveArrayLike'),
-                    resolveObject = context.member('resolveObject'),
-                    infos = resolveStructure(context, value, resolveArrayLike, resolveObject);
-                context.target = target;
-                assign(context, infos);
+        constructor: function (supr, args) {
+            supr(args);
+            var context = this,
+                structure = args[0],
+                identifier = args[1] || (counter += 1),
+                resolveStructure = context.member('resolveStructure'),
+                resolveArrayLike = context.member('resolveArrayLike'),
+                resolveObject = context.member('resolveObject'),
+                // normalize data
+                infos = resolveStructure(context, structure, resolveArrayLike, resolveObject),
+                hasher = this.member('hasher'),
+                pointers = this.member('pointers'),
+                hashed = hasher(identifier, infos.value),
+                pointer = pointers[hashed];
+            if (pointer) {
+                // return another pointer
+                return pointer;
             }
+            assign(context, infos);
+            context.id = hashed;
+            // save pointer in map to be used next time
+            // this structure is created
+            pointers[hashed] = context;
+            // returns this automatically
         },
         members: {
             // assume whole thing is in a non mutable state
             // and we're just keeping a reference to it
             resolveStructure: resolveStructure,
-            reconcile: reconcile
+            reconcile: reconcile,
+            hasher: hash,
+            pointers: {}
         },
         methods: {
             is: function (prop, value) {
@@ -44,12 +66,15 @@ var Classy = require('@timelaps/classy'),
             },
             diffs: function (sets) {
                 var immutable = this;
-                return reduce(toArray(sets), function (memo, value) {
+                return reduce(toArrayFromArrayLike(sets), function (memo, value) {
                     return memo.concat(immutable.diff(value[0], value[1]));
                 }, []);
             },
-            diff: function (a, b) {
-                return checkMany(a, b, differ(this.mutable()));
+            diff: function (a, b, differences) {
+                return checkMany(a, b, differ(this.mutable(), differences || []));
+            },
+            hash: function () {
+                return this.id;
             },
             create: function (diffs) {
                 var immutable = this;
@@ -71,6 +96,14 @@ var Classy = require('@timelaps/classy'),
                 }
                 // get the latest constructor, not just Hash
                 return this.create(diffs);
+            },
+            getDeep: function (chain) {
+                return reduce(chain, function (branch, key) {
+                    return branch && branch.get(key);
+                }, this);
+            },
+            setDeep: function (chain, value) {
+                return this.set(toStructure(chain, value));
             },
             matches: function (object) {
                 return computeDifferences(object, this.mutable());
@@ -99,9 +132,68 @@ var Classy = require('@timelaps/classy'),
             },
             isArrayLike: function () {
                 return !this.keys;
+            },
+            toJSON: function () {
+                return this.mutable();
             }
         }
     });
+ImmutableObject.of = function of() {
+    return this(toArrayFromArrayLike(arguments));
+};
+
+function decideWhichStructure(key) {
+    return isValidIndex(key) && isNumber(key) ? [] : {};
+}
+
+function toStructure(path, value_) {
+    var first = path[0];
+    var value = value_;
+    if (!isUndefined(first)) {
+        value = decideWhichStructure(first);
+        value[first] = toStructure(path.slice(1), value_);
+    }
+    return value;
+}
+
+function register(immutable, hash) {
+    var id = immutable.id;
+    if (isUndefined(id)) {
+        id = immutable.id = immutable.member('hash')(immutable.mutable());
+    }
+    return id;
+}
+
+function hash(id, mutable) {
+    return isArrayLike(mutable) ? hashArray(id, mutable) : (isObject(mutable) ? hashObject(id, mutable) : simpleHash(id, null, mutable));
+}
+
+function simpleHash(id, key, value) {
+    // number or string
+    return reduce((tv(key) + tv(value)).split(''), actualHash, 0);
+
+    function tv(value) {
+        return typeof value + value;
+    }
+}
+
+function actualHash(hash_, string) {
+    var char = string.charCodeAt(0),
+        hash = ((hash_ << 5) - hash_) + char;
+    return hash & hash; // Convert to 32bit integer
+}
+
+function hashObject(id, mutable) {
+    return reduceOwn(mutable, function (memo, value, key) {
+        if (isImmutable(value)) {
+            return memo + simpleHash(id, key, 'immutable' + value.id);
+        } else {
+            return memo + simpleHash(id, key, value);
+        }
+    }, 0);
+}
+
+function hashArray(mutable) {}
 
 function applyDifferences(mutable) {
     return function (delta) {
@@ -192,31 +284,40 @@ function runFullImmutableCheck(current, value) {}
 function traverse(prop) {}
 
 function reduceArrayLike(key, value, fn) {
-    return reduce(key, function (memo, key) {
-        return fn(memo, key, value);
+    return reduceOwn(key, function (memo, key) {
+        return memo.concat(fn(key, value));
     }, []);
 }
 
 function reduceObject(object, fn) {
     return reduceOwn(object, function (memo, value, key) {
-        return fn(memo, key, value);
+        return memo.concat(fn(key, value));
     }, []);
 }
 
-function differ(object, differences_) {
-    var differences = differences_ || [];
+function differ(object, differences) {
     return function differInstance(key, value) {
-        var diffs, next, current;
+        var fn, nu, diffs, current;
         if ((current = object[key]) === value) {
             return differences;
         } else if (isImmutable(current)) {
-            diffs = current.diff(key, value);
-            next = current.create(diffs);
-            return differences.concat(diffs.length ? [function (clone) {
-                clone[key] = next;
-            }] : []);
+            if (isObject(value)) {
+                nu = current.set(value);
+            }
+            if (nu === current) {
+                return differences;
+            } else if (!nu) {
+                fn = function (clone) {
+                    clone[key] = value;
+                };
+            } else {
+                fn = function (clone) {
+                    clone[key] = nu;
+                };
+            }
+            return differences.concat([fn]);
         }
-        return differences.concat(current === value ? [] : [function (clone) {
+        return differences.concat([function (clone) {
             clone[key] = value;
         }]);
     };
@@ -229,7 +330,7 @@ function resolveArrayLikeStructure(array, parent) {
             if (!isObject(value)) {
                 return value;
             } else {
-                return ImmutableArray(value, parent);
+                return parent.__constructor__(value, parent);
             }
         })
     };
@@ -248,7 +349,7 @@ function resolveObjectStructure(object, parent) {
                 // non object values are immutable
                 return value;
             } else {
-                return ImmutableObject(value, parent);
+                return parent.__constructor__(value, parent);
             }
         }),
         length: k.length
