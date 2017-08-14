@@ -1,5 +1,5 @@
 {
-  "name": "immutable",
+  "name": "@timelaps/immutable",
   "version": "1.0.1",
   "description": "",
   "main": "index.js",
@@ -21,8 +21,8 @@
   "dependencies": {
     "@timelaps/array": "^1.0.9",
     "@timelaps/classy": "^1.0.16",
-    "@timelaps/fn": "^1.0.10",
-    "@timelaps/is": "^1.0.10",
+    "@timelaps/fn": "^1.0.11",
+    "@timelaps/is": "^1.0.11",
     "@timelaps/n": "^1.0.23",
     "@timelaps/object": "^1.0.19"
   },

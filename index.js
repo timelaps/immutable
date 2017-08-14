@@ -9,6 +9,8 @@ var Classy = require('@timelaps/classy'),
     get = require('@timelaps/n/get/shallow'),
     set = require('@timelaps/n/set/shallow'),
     del = require('@timelaps/n/del/shallow'),
+    indexOf = require('@timelaps/n/index/of'),
+    constructorName = require('@timelaps/fn/constructor-name'),
     setDeep = require('@timelaps/n/set/deep'),
     forOwnEnd = require('@timelaps/n/for/own/end'),
     isValidIndex = require('@timelaps/is/valid-index'),
@@ -26,30 +28,40 @@ var Classy = require('@timelaps/classy'),
     isNumber = require('@timelaps/is/number'),
     counter = 0,
     b = require('@timelaps/batterie'),
-    ImmutableObject = module.exports = Classy.extend('ImmutableObject', {
+    Cluster = require('./cluster'),
+    ImmutableLiteral = module.exports = Classy.extend('ImmutableLiteral', {
         constructor: function (supr, args) {
+            var index, structure = args[0],
+                second = args[1],
+                chain = second || {
+                    id: counter += 1,
+                    stack: []
+                },
+                stack = chain.stack;
+            if ((index = indexOf(stack, structure)) !== -1) {
+                return stack[index];
+            }
             supr(args);
+            stack.push(structure);
             var context = this,
-                structure = args[0],
                 identifier = args[1] || (counter += 1),
+                hasher = context.member('hasher'),
+                pointers = context.member('pointers'),
                 resolveStructure = context.member('resolveStructure'),
-                resolveArrayLike = context.member('resolveArrayLike'),
-                resolveObject = context.member('resolveObject'),
-                // normalize data
-                infos = resolveStructure(context, structure, resolveArrayLike, resolveObject),
-                hasher = this.member('hasher'),
-                pointers = this.member('pointers'),
-                hashed = hasher(identifier, infos.value),
-                pointer = pointers[hashed];
+                infos = resolveStructure(context, structure, chain),
+                value = context.value,
+                hashed = hasher(value),
+                name = constructorName(value),
+                pointer = pointers.get(name, hashed);
+            stack.pop();
             if (pointer) {
                 // return another pointer
                 return pointer;
             }
-            assign(context, infos);
             context.id = hashed;
             // save pointer in map to be used next time
             // this structure is created
-            pointers[hashed] = context;
+            pointers.set(name, hashed, context);
             // returns this automatically
         },
         members: {
@@ -58,7 +70,7 @@ var Classy = require('@timelaps/classy'),
             resolveStructure: resolveStructure,
             reconcile: reconcile,
             hasher: hash,
-            pointers: {}
+            pointers: Cluster()
         },
         methods: {
             is: function (prop, value) {
@@ -138,7 +150,7 @@ var Classy = require('@timelaps/classy'),
             }
         }
     });
-ImmutableObject.of = function of() {
+ImmutableLiteral.of = function of() {
     return this(toArrayFromArrayLike(arguments));
 };
 
@@ -164,16 +176,16 @@ function register(immutable, hash) {
     return id;
 }
 
-function hash(id, mutable) {
-    return isArrayLike(mutable) ? hashArray(id, mutable) : (isObject(mutable) ? hashObject(id, mutable) : simpleHash(id, null, mutable));
+function hash(mutable) {
+    return isArrayLike(mutable) ? hashArray(mutable) : (isObject(mutable) ? hashObject(mutable) : simpleHash(null, mutable));
 }
 
-function simpleHash(id, key, value) {
+function simpleHash(key, value, memo) {
     // number or string
-    return reduce((tv(key) + tv(value)).split(''), actualHash, 0);
+    return reduce((tv(key) + tv(value)).split(''), actualHash, memo || 0);
 
     function tv(value) {
-        return typeof value + value;
+        return constructorName(value) + value;
     }
 }
 
@@ -183,17 +195,25 @@ function actualHash(hash_, string) {
     return hash & hash; // Convert to 32bit integer
 }
 
-function hashObject(id, mutable) {
-    return reduceOwn(mutable, function (memo, value, key) {
-        if (isImmutable(value)) {
-            return memo + simpleHash(id, key, 'immutable' + value.id);
-        } else {
-            return memo + simpleHash(id, key, value);
-        }
-    }, 0);
+function hashImmutableUnder(key, immutable, memo) {
+    return simpleHash(key, 'immutable' + immutable.id, memo);
 }
 
-function hashArray(mutable) {}
+function hashKeyValuePairs(memo, value, key) {
+    if (isImmutable(value)) {
+        return hashImmutableUnder(key, value, memo);
+    } else {
+        return simpleHash(key, value, memo);
+    }
+}
+
+function hashObject(mutable) {
+    return reduceOwn(mutable, hashKeyValuePairs, 0);
+}
+
+function hashArray(mutable) {
+    return reduce(mutable, hashKeyValuePairs, 0);
+}
 
 function applyDifferences(mutable) {
     return function (delta) {
@@ -265,7 +285,7 @@ function spotDifference(immutable, alreadychecked) {
 }
 
 function isImmutable(item) {
-    return ImmutableObject.isInstance(item);
+    return ImmutableLiteral.isInstance(item);
 }
 
 function unwrap(value) {
@@ -323,36 +343,65 @@ function differ(object, differences) {
     };
 }
 
-function resolveArrayLikeStructure(array, parent) {
-    return {
-        length: array.length,
-        value: map(array, function (value) {
-            if (!isObject(value)) {
-                return value;
-            } else {
-                return parent.__constructor__(value, parent);
-            }
-        })
+function resolveArrayLikeStructure(context, array, stack, maker) {
+    context.length = array.length;
+    var result = reduce(array, buildArrayWithImmutables(maker, stack), {
+        value: [],
+        hash: 0
+    });
+    context.value = result.value;
+    return context;
+}
+
+function buildArrayWithImmutables(maker, stack) {
+    return function (memo, value, index) {
+        var val = value;
+        var array = memo.value;
+        var hasher = simpleHash;
+        if (isObject(value)) {
+            val = maker(value, stack);
+            hasher = hashImmutableUnder;
+        }
+        memo.hash = hasher(index, val, memo.hash);
+        array.push(val);
+        memo.value.push(val);
+        return memo;
     };
 }
 
-function resolveObjectStructure(object, parent) {
+function resolveObjectStructure(context, object, stack, maker) {
     // push because we're already
     // getting keys inside of mapValues
-    var k = [];
-    return {
-        keys: k,
-        value: mapValues(object, function (value_, key) {
-            var matchesImmutable, value = value_;
-            k.push(key);
-            if (!isObject(value)) {
-                // non object values are immutable
-                return value;
-            } else {
-                return parent.__constructor__(value, parent);
-            }
-        }),
-        length: k.length
+    var k = keys(object).sort();
+    context.keys = k;
+    context.length = k.length;
+    var values = context.values = [];
+    var result = reduce(k, buildObjectWithImmutables(maker, stack), {
+        hash: 0,
+        values: values,
+        value: {},
+        maker: maker,
+        stack: stack,
+        original: object
+    });
+    context.value = result.value;
+    return context;
+}
+
+function buildObjectWithImmutables(maker, stack) {
+    return function (memo, key, index) {
+        var original = memo.original;
+        var copy = memo.value;
+        var value = original[key];
+        var hasher = simpleHash;
+        if (isObject(value)) {
+            value = maker(value, stack);
+            hasher = hashImmutableUnder;
+        }
+        memo.hash = hasher(key, value, memo.hash);
+        memo.values.push(value);
+        copy[key] = value;
+        return memo;
     };
 }
 
@@ -360,26 +409,25 @@ function isIterable(branch) {
     return !isUndefined(branch.length);
 }
 
-function leaf(item) {
-    return {
-        value: item
-    };
+function leaf(context, item) {
+    context.value = item;
+    return context;
 }
 
-function resolveStructure(context, item, resolveArrayLike_, resolveObject_) {
-    var resolveArrayLike = resolveArrayLike_ || resolveArrayLikeStructure,
-        resolveObject = resolveObject_ || resolveObjectStructure;
+function resolveStructure(context, item, stack) {
+    var resolveArrayLike = resolveArrayLikeStructure,
+        resolveObject = resolveObjectStructure;
     // branches
     if (isImmutable(item)) {
         return item;
     } else if (isArrayLike(item)) {
         // should just array
-        return resolveArrayLikeStructure(item, context);
+        return resolveArrayLikeStructure(context, item, stack, context.__constructor__);
     } else if (isObject(item)) {
-        return resolveObjectStructure(item, context);
+        return resolveObjectStructure(context, item, stack, context.__constructor__);
     } else {
         // leaf
-        return leaf(item);
+        return leaf(context, item);
     }
 
     function resolve(item) {

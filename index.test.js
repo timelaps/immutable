@@ -50,6 +50,7 @@ b.describe('Immutable', function () {
             var s1 = Immutable({
                 values: 5
             });
+            debugger;
             var s0 = Immutable({
                 some: {
                     deep: {
@@ -78,6 +79,18 @@ b.describe('Immutable', function () {
                 values: 5
             });
             t.expect(s2.getDeep(['b', 'deeper'])).toBe(s1.getDeep(['a', 'deep']));
+        });
+    });
+    b.describe('circularity', function () {
+        b.it('works', function (t) {
+            var a = [];
+            var b = {
+                a: a
+            };
+            var c = [b];
+            a.push(c);
+            var s1 = Immutable(c);
+            t.expect(s1).toBeInstance(Immutable.constructor);
         });
     });
 });
