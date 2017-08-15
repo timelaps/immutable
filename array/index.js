@@ -1,15 +1,19 @@
 module.exports = ArrayTrie;
-var repeat = require('@timelaps/string/base/repeat');
+ArrayTrie.Leaf = ArrayLeaf;
+ArrayTrie.Branch = ArrayBranch;
+var u, repeat = require('@timelaps/string/base/repeat');
 var MAX = 32;
 var binaryLength = MAX.toString(2).length;
 var zerostring = repeat('0', binaryLength);
 var fromTo = require('@timelaps/n/from/to');
-
+var isUndefined = require('@timelaps/is/undefined');
+var assign = require('@timelaps/object/assign');
+var create = require('@timelaps/object/create');
+var reduce = require('@timelaps/array/reduce');
 // function chunkBinary(binary, size) {
 //     var chunk = currentChunk(binary, size);
 //     return chunk.length >= binaryLength ? chunk : zerostring.slice(chunk.length - 1) + chunk;
 // }
-
 function currentChunk(binary, size) {
     var filled = binary;
     var binLength = binary.length;
@@ -25,8 +29,8 @@ function currentChunk(binary, size) {
     }
 }
 
-function currentIndex(binary, size) {
-    return parseInt(currentChunk(binary, size), 2);
+function binaryToIndex(binary) {
+    return parseInt(binary, 2);
 }
 
 function nextChunk(binary) {
@@ -42,11 +46,12 @@ function isGreaterThanMax(binary) {
 }
 ArrayLeafPrototype = ArrayLeaf.prototype = {
     get: function (binary) {
-        var index = currentIndex(binary);
-        return index > MAX ? u : this.value[index];
+        // var index = binaryToIndex(binary);
+        var current = binary[0];
+        return current ? index > MAX ? u : this.value[index] : u;
     },
     set: function (binary, value) {
-        var temp, current, index = currentIndex(binary);
+        var temp, current, index = binaryToIndex(binary);
         if (index > MAX) {
             // wasteful
             temp = new ArrayBranch([this]);
@@ -94,13 +99,14 @@ function appropriatelySized() {
     return new Array(MAX);
 }
 
-function ArrayTrie(array) {
-    return array.length <= MAX ? ArrayLeaf(array) : ArrayBranch(array);
+function ArrayTrie(array, forceBranch) {
+    return !forceBranch && array.length <= MAX ? new ArrayLeaf(array) : new ArrayBranch(array);
 }
 ArrayBranch.prototype = assign(create(ArrayLeafPrototype), {
     get: function (binary) {
-        var item = this.retreive(binary);
-        return item instanceof ArrayLeaf ? item.get(nextChunk(binary)) : u;
+        var item = this.retreive(binary[0]);
+        // we can do this because
+        return item instanceof ArrayLeaf ? item.get(binary.slice(1)) : u;
     },
     copy: function () {},
     set: function (binary, pointer) {
@@ -117,7 +123,7 @@ ArrayBranch.prototype = assign(create(ArrayLeafPrototype), {
         }
     },
     retreive: function (binary) {
-        return this.value[currentIndex(binary, this.size)];
+        return this.value[binaryToIndex(binary)];
     },
     bunch: function () {
         // restructure to fit more in array
@@ -128,20 +134,21 @@ ArrayBranch.prototype = assign(create(ArrayLeafPrototype), {
     }
 });
 
-function build(branch, array) {
-    fromTo(array, function (value, index, array) {
-        var slice = array.slice(index, index + MAX);
-        var next = array;
-    }, 0, array.length, MAX);
+function build(branch, array, size) {
+    // debugger;
+    return fromTo(function (index, newarray) {
+        newarray[index / size] = ArrayTrie(array.slice(index, index + MAX));
+        return newarray;
+    }, appropriatelySized(), 0, MAX - 1, size);
 }
 
-function ArrayBranch(array, mutating, index, value) {
-    var length = array.length;
-    if (length > MAX) {
-        this.value = appropriatelySized();
-        this.size = length.toString(2);
-        build(this, array);
-    } else {
-        this.value = fill(array);
-    }
+function computeDepth(length) {
+    return length > MAX ? 1 + computeDepth(length / MAX) : 0;
+}
+
+function ArrayBranch(array, size) {
+    var length = array.length,
+        depth = this.depth = isUndefined(size) ? computeDepth(length) : size;
+    this.size = length.toString(2);
+    this.value = length > MAX ? build(this, array, MAX * depth) : fill(array);
 }

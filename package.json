@@ -19,11 +19,11 @@
   },
   "homepage": "https://github.com/timelaps/immutable#readme",
   "dependencies": {
-    "@timelaps/array": "^1.0.10",
-    "@timelaps/classy": "^1.0.16",
+    "@timelaps/array": "^1.0.11",
+    "@timelaps/classy": "^1.0.17",
     "@timelaps/fn": "^1.0.11",
-    "@timelaps/is": "^1.0.12",
-    "@timelaps/n": "^1.0.24",
+    "@timelaps/is": "^1.0.13",
+    "@timelaps/n": "^1.0.25",
     "@timelaps/object": "^1.0.20"
   },
   "devDependencies": {
