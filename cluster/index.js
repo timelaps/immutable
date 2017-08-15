@@ -9,9 +9,15 @@ module.exports = Classy.extend('Cluster', {
         }
     },
     methods: {
-        get: function (group, key) {
-            var g = this.pointers[group];
-            return g && resolveLocation(g, key);
+        get: function (group, key, value) {
+            var pointers = this.pointers;
+            var level = pointers[group];
+            if (!level) {
+                level = pointers[group] = {};
+            }
+            var hashed = level[key];
+            var length = arguments.length;
+            return hashed && (length === 3 ? findValueGiven(hash, value) : hashed.first);
         },
         set: function (group, key, value) {
             var pointers = this.pointers;
@@ -35,7 +41,8 @@ module.exports = Classy.extend('Cluster', {
             if (!(group = pointers[group_]) || !(hashed = group[key_])) {
                 return false;
             } else {
-                return hashed.first === value || find(hashed.next, curriedStrictlyEqual(value));
+                // missleading for undefined
+                return arguments.length === 3 ? findValueGiven(hashed, value) === value : true;
             }
         },
         del: function (group_, key_, value) {
@@ -57,13 +64,9 @@ module.exports = Classy.extend('Cluster', {
     }
 });
 
-function curriedStrictlyEqual(value) {
-    return function (item) {
+function findValueGiven(hashed, value) {
+    var first = hashed.first;
+    return first === value ? first : find(hashed.next, function (item) {
         return item === value;
-    };
-}
-
-function resolveLocation(level, key) {
-    var hashed = level[key];
-    return hashed && hashed.first;
+    });
 }

@@ -28,6 +28,7 @@ var Classy = require('@timelaps/classy'),
     isNumber = require('@timelaps/is/number'),
     counter = 0,
     b = require('@timelaps/batterie'),
+    repeat = require('@timelaps/string/base/repeat'),
     Cluster = require('./cluster'),
     ImmutableLiteral = module.exports = Classy.extend('ImmutableLiteral', {
         constructor: function (supr, args) {
@@ -58,6 +59,7 @@ var Classy = require('@timelaps/classy'),
                 // return another pointer
                 return pointer;
             }
+            context.changing = 0;
             context.id = hashed;
             // save pointer in map to be used next time
             // this structure is created
@@ -88,7 +90,12 @@ var Classy = require('@timelaps/classy'),
             hash: function () {
                 return this.id;
             },
-            create: function (diffs) {
+            createNext: function () {
+                var diffs = this.changes;
+                delete this.changes;
+                return this.createFrom(diffs);
+            },
+            createFrom: function (diffs) {
                 var immutable = this;
                 var reconciler = immutable.member('reconcile');
                 var mutable = immutable.mutable();
@@ -102,12 +109,16 @@ var Classy = require('@timelaps/classy'),
             get: singleProxy(get),
             del: singleProxy(del),
             set: function (prop, value) {
-                var diffs, structure = this.mutable();
+                var diffs;
                 if (!(diffs = this.diff(prop, value)).length) {
                     return this;
                 }
-                // get the latest constructor, not just Hash
-                return this.create(diffs);
+                // get the latest constructor
+                return this.createFrom(diffs);
+            },
+            queue: function (diffs) {
+                this.changes = (this.changes || []).concat(diffs || []);
+                return this;
             },
             getDeep: function (chain) {
                 return reduce(chain, function (branch, key) {
@@ -115,6 +126,7 @@ var Classy = require('@timelaps/classy'),
                 }, this);
             },
             setDeep: function (chain, value) {
+                // wasteful
                 return this.set(toStructure(chain, value));
             },
             matches: function (object) {
@@ -122,12 +134,10 @@ var Classy = require('@timelaps/classy'),
             },
             isValueOf: function (object) {
                 var alreadychecked = {};
-                if (this.mutable() === object) {
-                    return true;
-                } else if (!isObject(object)) {
+                if (!isObject(object)) {
                     return false;
                 } else {
-                    return checkBothSidesForDifferences(this, b);
+                    return checkBothSidesForDifferences(this, object);
                 }
             },
             isIterable: function () {
@@ -151,7 +161,7 @@ var Classy = require('@timelaps/classy'),
         }
     });
 ImmutableLiteral.of = function of() {
-    return this(toArrayFromArrayLike(arguments));
+    return ImmutableLiteral(toArrayFromArrayLike(arguments));
 };
 
 function decideWhichStructure(key) {
@@ -251,9 +261,9 @@ function singleProxy(fn) {
     };
 }
 
-function checkBothSidesForDifferences(a, b) {
+function checkBothSidesForDifferences(immutable, b) {
     var alreadychecked = {};
-    var aKeys, bKeys, _a = a,
+    var aKeys, bKeys, _a = immutable,
         _b = b;
     if (!isArrayLike(a)) {
         _a = keys(a);
@@ -375,10 +385,8 @@ function resolveObjectStructure(context, object, stack, maker) {
     var k = keys(object).sort();
     context.keys = k;
     context.length = k.length;
-    var values = context.values = [];
     var result = reduce(k, buildObjectWithImmutables(maker, stack), {
         hash: 0,
-        values: values,
         value: {},
         maker: maker,
         stack: stack,
@@ -399,7 +407,6 @@ function buildObjectWithImmutables(maker, stack) {
             hasher = hashImmutableUnder;
         }
         memo.hash = hasher(key, value, memo.hash);
-        memo.values.push(value);
         copy[key] = value;
         return memo;
     };
